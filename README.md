@@ -6,14 +6,39 @@ This repository ships two layers, and you pick the one that fits:
 
 | Layer                  | Use it when                                                            | Entry point                                                                                |
 |------------------------|------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
-| **Reusable workflows** | You want the whole pipeline in four lines                              | [`build.yml`](.github/workflows/build.yml), [`publish.yml`](.github/workflows/publish.yml) |
+| **Reusable workflows** | You want the whole pipeline in four lines                              | [`build-pr.yml`](.github/workflows/build-pr.yml), [`build.yml`](.github/workflows/build.yml), [`publish.yml`](.github/workflows/publish.yml) |
 | **Composite actions**  | You need to reorder steps, add your own, or set `permissions` yourself | [`.github/actions/*`](.github/actions)                                                     |
 
 Full input reference: **[docs/actions.md](docs/actions.md)** · Worked examples: **[docs/recipes.md](docs/recipes.md)**
 
 ---
 
-## Quick start — the whole pipeline
+## Quick start — separate PR checks from trusted builds
+
+Use two workflow files in the consuming repository. PR checks build and test with a read-only token;
+push builds can receive the credentials needed for Maven publishing or Discord notifications.
+
+`.github/workflows/pull-request.yml`:
+
+```yaml
+name: Pull request
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: GroupeZ-dev/actions/.github/workflows/build-pr.yml@main
+    with:
+      project-name: "zMenu"
+```
+
+No `secrets: inherit` is needed. Use a ref containing `build-pr.yml`; older release tags do not
+automatically acquire the new workflow. Once released, pin the workflow and `actions-ref` together.
+
+`.github/workflows/build.yml`:
 
 ```yaml
 name: Build
@@ -21,7 +46,10 @@ name: Build
 on:
   push:
     branches: [main]
-  pull_request:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:
@@ -31,13 +59,29 @@ jobs:
     secrets: inherit
 ```
 
-That gets you:
+The trusted push pipeline gets you:
 
 - build-tool detection (Gradle or Maven) and a JDK with dependency caching
 - a development build off the default branch, tagged `-DEV` with the short SHA
 - a JUnit test summary in the job summary
 - a Discord message that posts as **build running** and is edited in place into **passed** or
   **failed**, showing the included changes, test result, duration and built jar
+
+The PR pipeline keeps build-tool detection, tests and downloadable artifacts, with no publishing
+or Discord steps. Existing callers of `build.yml` remain compatible; move their `pull_request`
+trigger to the new PR workflow to use its reduced permissions.
+
+### Fork workflow approvals
+
+Separate workflows do **not** bypass GitHub's fork approval policy. In each consuming repository,
+review **Settings → Actions → General → Approval for running fork pull request workflows from
+contributors**. A first-time-contributor policy avoids repeated approvals for established
+contributors, while an organization or enterprise policy can override the repository setting.
+See [GitHub's approval documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks).
+
+Keep the PR trigger as `pull_request`; do not use `pull_request_target` to execute fork code with
+privileged credentials. Builds depending on private artifacts must be handled separately: this
+workflow deliberately has no credential inputs.
 
 <details>
 <summary>What the Discord message looks like</summary>
@@ -243,10 +287,10 @@ usually resolves to WSL rather than Git Bash, so the script appears to do nothin
 It extracts the script straight out of `discord-notify/action.yml`, so the preview is exactly what
 CI would send. Needs `jq` (`winget install jqlang.jq`), `curl` and Python with PyYAML.
 
-[`self-test.yml`](.github/workflows/self-test.yml) runs `actionlint` over every workflow and
-action, plus a job that exercises `discord-notify` for real: it checks the no-webhook no-op stays
-green, and — where a `SELFTEST_WEBHOOK_URL` secret exists — posts a message and edits it in place
-to confirm the lifecycle works end to end.
+[`self-test-pr.yml`](.github/workflows/self-test-pr.yml) runs `actionlint` and the no-webhook Discord
+check on pull requests, with read-only permissions and no secrets. [`self-test.yml`](.github/workflows/self-test.yml)
+keeps the trusted push/manual checks, including real Discord delivery where a `SELFTEST_WEBHOOK_URL`
+secret exists. The two triggers do not overlap on PRs.
 
 The build-tool actions are not covered by CI here; exercising them needs a real Java project, and
 they are proven by the repositories that consume them.

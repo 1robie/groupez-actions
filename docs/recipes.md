@@ -6,12 +6,17 @@ Worked examples. Full input lists are in [actions.md](actions.md).
 
 ## Gradle plugin, default everything
 
+Trusted build file (`.github/workflows/build.yml`):
+
 ```yaml
 name: Build
 on:
   push:
     branches: [main]
-  pull_request:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build:
@@ -21,6 +26,27 @@ jobs:
       actions-ref: "v1"
     secrets: inherit
 ```
+
+Separate PR file (`.github/workflows/pull-request.yml`):
+
+```yaml
+name: Pull request
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: GroupeZ-dev/actions/.github/workflows/build-pr.yml@main
+    with:
+      project-name: "zMenu"
+```
+
+Use a ref that contains `build-pr.yml`; pin a release once the new workflow is published. No
+secrets are forwarded to PR jobs. See [fork approvals](../README.md#fork-workflow-approvals) if
+GitHub still requests maintainer approval for an external contribution.
 
 ## Gradle plugin that publishes to Maven on the default branch
 

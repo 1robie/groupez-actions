@@ -1,0 +1,151 @@
+name: Pull request build
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: "Project name (e.g. zMenu)"
+        required: true
+        type: string
+      java-version:
+        type: string
+        default: "25"
+      java-distribution:
+        type: string
+        default: "temurin"
+      runs-on:
+        description: "JSON array of runner labels. Use GitHub-hosted runners for external PRs."
+        type: string
+        default: '["ubuntu-latest"]'
+      build-tool:
+        description: "auto, gradle or maven"
+        type: string
+        default: "auto"
+      build-command:
+        description: "Empty uses the existing Gradle build or Maven verify command."
+        type: string
+        default: ""
+      dev-args:
+        type: string
+        default: "-Darchive.classifier=DEV -Dgithub.sha={sha}"
+      working-directory:
+        type: string
+        default: "."
+      gradle-opts:
+        type: string
+        default: "-Dorg.gradle.caching=true -Dorg.gradle.parallel=true"
+      cache:
+        type: boolean
+        default: true
+      timeout-minutes:
+        type: number
+        default: 20
+      artifact-glob:
+        description: "Empty uses the existing build-tool artifact glob."
+        type: string
+        default: ""
+      artifact-exclude:
+        type: string
+        default: "*-sources.jar,*-javadoc.jar,original-*.jar"
+      artifact-retention-days:
+        type: number
+        default: 7
+      actions-ref:
+        description: "Ref of GroupeZ-dev/actions containing the composite actions."
+        type: string
+        default: "main"
+    outputs:
+      artifact-path:
+        value: ${{ jobs.build.outputs.artifact-path }}
+      artifact-name:
+        value: ${{ jobs.build.outputs.artifact-name }}
+      test-summary:
+        value: ${{ jobs.build.outputs.test-summary }}
+
+# No package publishing, write permissions or secrets are needed for a PR build.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    concurrency:
+      group: groupez-pr-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      artifact-path: ${{ steps.artifacts.outputs.path }}
+      artifact-name: ${{ steps.artifacts.outputs.name }}
+      test-summary: ${{ steps.tests.outputs.summary }}
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the actions toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
+        with:
+          repository: GroupeZ-dev/actions
+          ref: ${{ inputs.actions-ref }}
+          path: .groupez-actions
+          persist-credentials: false
+
+      - name: Setup build environment
+        id: setup
+        uses: ./.groupez-actions/.github/actions/setup-build
+        with:
+          build-tool: ${{ inputs.build-tool }}
+          java-version: ${{ inputs.java-version }}
+          java-distribution: ${{ inputs.java-distribution }}
+          cache: ${{ inputs.cache }}
+          gradle-opts: ${{ inputs.gradle-opts }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Build and test
+        id: build
+        uses: ./.groupez-actions/.github/actions/run-build
+        with:
+          build-tool: ${{ steps.setup.outputs.build-tool }}
+          command: ${{ inputs.build-command }}
+          dev-args: ${{ inputs.dev-args }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Summarise test results
+        id: tests
+        if: ${{ always() && steps.setup.outputs.build-tool != '' }}
+        uses: ./.groupez-actions/.github/actions/test-summary
+        with:
+          build-tool: ${{ steps.setup.outputs.build-tool }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Find build artifacts
+        id: artifacts
+        uses: ./.groupez-actions/.github/actions/find-artifacts
+        with:
+          build-tool: ${{ steps.setup.outputs.build-tool }}
+          glob: ${{ inputs.artifact-glob }}
+          exclude: ${{ inputs.artifact-exclude }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Upload build output
+        if: ${{ steps.artifacts.outputs.paths != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ inputs.project-name }}-PR-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: ${{ steps.artifacts.outputs.paths }}
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error
+
+      - name: Upload test reports on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: test-reports-${{ github.run_id }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+            **/build/test-results/**
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: ignore

@@ -3,7 +3,6 @@ name: Self test
 on:
   push:
     branches: ["main"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -41,8 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
 
-      # With no webhook the action must succeed and emit an empty message id. This is the path
-      # every forked pull request takes, so it has to stay green.
+      # Keep the no-secret path covered on trusted runs too; PRs use self-test-pr.yml.
       - name: No webhook is a clean no-op
         id: noop
         uses: ./.github/actions/discord-notify
@@ -60,7 +58,7 @@ jobs:
           fi
           echo "ok: no-op returned an empty message id"
 
-      # Real delivery only runs where the secret exists, which excludes forks.
+      # Real delivery is confined to push/manual runs; PR checks never receive a webhook.
       - name: Post, then edit in place
         id: start
         if: ${{ env.SELFTEST_WEBHOOK != '' }}

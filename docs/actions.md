@@ -242,6 +242,40 @@ uses: GroupeZ-dev/actions/.github/actions/discord-notify@v1
 
 ## Reusable workflows
 
+### `build-pr.yml`
+
+PR-only build and test workflow. Requires only `contents: read`; declares no secrets and contains
+no publishing or Discord steps. Checkout credentials are not persisted. Reuses the existing
+`setup-build`, `run-build`, `test-summary` and `find-artifacts` composite actions.
+
+```yaml
+uses: GroupeZ-dev/actions/.github/workflows/build-pr.yml@main
+```
+
+| Input | Default | Description |
+|---|---|---|
+| `project-name` **required** | — | Project name used for the uploaded artifact. |
+| `java-version` | `25` | JDK version. |
+| `java-distribution` | `temurin` | JDK distribution. |
+| `runs-on` | `["ubuntu-latest"]` | JSON array of runner labels; use hosted runners for external PRs. |
+| `build-tool` | `auto` | `auto`, `gradle` or `maven`. |
+| `build-command` | — | Empty uses Gradle `build` or Maven `verify`. |
+| `dev-args` | `-Darchive.classifier=DEV -Dgithub.sha={sha}` | Development build arguments. |
+| `working-directory` | `.` | Project directory. |
+| `gradle-opts` | `-Dorg.gradle.caching=true -Dorg.gradle.parallel=true` | Gradle options. |
+| `cache` | `true` | Enable existing dependency caching. |
+| `timeout-minutes` | `20` | Job timeout. |
+| `artifact-glob` | — | Empty uses the existing build-tool glob. |
+| `artifact-exclude` | `*-sources.jar,*-javadoc.jar,original-*.jar` | Excluded artifact filenames. |
+| `artifact-retention-days` | `7` | Retention for artifacts and failure reports. |
+| `actions-ref` | `main` | Ref of `GroupeZ-dev/actions` containing the composite actions. |
+
+**Outputs**: `artifact-path`, `artifact-name`, `test-summary`.
+
+The job runs only for `pull_request`. Success uploads the selected build artifact; failures upload
+available test reports. No changelog requires a full checkout. GitHub fork approvals still follow
+the consuming repository's policy; see the [setup instructions](../README.md#fork-workflow-approvals).
+
 ### `build.yml`
 
 ```yaml
